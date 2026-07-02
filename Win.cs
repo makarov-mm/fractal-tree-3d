@@ -12,6 +12,7 @@ internal static class Win
     public const uint PM_REMOVE = 0x0001;
     public const uint WM_DESTROY = 0x0002, WM_SIZE = 0x0005, WM_QUIT = 0x0012;
     public const uint WM_MOUSEMOVE = 0x0200, WM_LBUTTONDOWN = 0x0201, WM_LBUTTONUP = 0x0202, WM_MOUSEWHEEL = 0x020A;
+    public const uint WM_KEYDOWN = 0x0100;
 
     public const uint PFD_DRAW_TO_WINDOW = 0x00000004;
     public const uint PFD_SUPPORT_OPENGL = 0x00000020;
@@ -82,6 +83,7 @@ internal static class Win
 
     [DllImport("user32.dll")] public static extern IntPtr DefWindowProcW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] public static extern void PostQuitMessage(int code);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool SetWindowTextW(IntPtr hWnd, string text);
     [DllImport("user32.dll")] public static extern IntPtr LoadCursorW(IntPtr hInstance, IntPtr lpCursorName);
     [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);

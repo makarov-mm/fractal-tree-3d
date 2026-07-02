@@ -19,8 +19,13 @@ Window creation, input handling, WGL/OpenGL context setup, OpenGL function loadi
 - Radius interpolation from thick trunk to thin twigs.
 - Dynamic vertex displacement that gives branches a subtle wind/sway animation.
 - Glowing additive canopy sprites rendered at branch tips.
+- Growth animation: the tree grows from a seed over several seconds. Every vertex stores its normalized path length from the root; the geometry shader clips unreached segments, extends the currently growing ones, and thickens young wood as it matures.
+- Seven color palettes (Sakura, Autumn, Bioluminescent, Ember, Frost, Emerald, Aurora), switchable at runtime. The Aurora palette drifts around the hue wheel over time.
+- Random tree species: branching factor (2-4), tilt, shrink ratio, and recursion depth are re-rolled on demand, so every regrown tree looks different.
+- Falling petals once the canopy is complete: pure GPU particles whose looping fall trajectory is derived from time alone in the vertex shader, with zero per-frame CPU work.
+- Wind with slow gusts (amplitude-modulated sway).
 - Depth-tested rendering so near branches occlude far branches correctly.
-- Background radial gradient rendered as a fullscreen quad.
+- Background radial gradient rendered as a fullscreen quad, tinted per palette.
 - Orbit camera with mouse control, mouse-wheel zoom, and idle auto-rotation.
 - Raw Win32/WGL/OpenGL implementation through P/Invoke.
 
@@ -30,7 +35,11 @@ Window creation, input handling, WGL/OpenGL context setup, OpenGL function loadi
 | --- | --- |
 | Left mouse button + drag | Rotate/orbit the camera |
 | Mouse wheel | Zoom in/out |
-| Close window | Exit the program |
+| Space | Grow a brand-new random tree |
+| R | Replay the growth of the current tree |
+| C | Cycle color palettes |
+| 1-7 | Select a palette directly |
+| Esc | Exit the program |
 
 When the mouse is not being dragged, the camera slowly rotates automatically.
 
@@ -79,23 +88,20 @@ Branch tips are rendered separately as OpenGL points. The point shader changes t
 The main tree parameters are defined near the top of `Program.cs`:
 
 ```csharp
-const int   MaxDepth  = 8;
-const int   Children  = 3;
-const float Ratio     = 0.74f;
-const float TiltDeg   = 36.0f;
-const float TrunkR    = 0.030f;
-const float TipR      = 0.0035f;
+const float TrunkR      = 0.030f;
+const float TipR        = 0.0035f;
+const float GrowSeconds = 8.0f;
+const int   PetalMax    = 1400;
 ```
 
-Useful tuning directions:
+Per-species parameters (branch count, depth, shrink ratio, tilt) are randomized in `RollSpecies` and can be pinned to fixed values there. Useful tuning directions:
 
-- Increase `MaxDepth` for a more complex tree. This grows the number of segments quickly.
-- Increase `Children` for denser branching. This also increases geometry very quickly.
-- Adjust `Ratio` to control how fast branch lengths shrink.
-- Adjust `TiltDeg` to make the tree more vertical or more spread out.
+- Adjust the ranges in `RollSpecies` to bias tree shapes (denser, taller, more spread out).
+- Adjust `GrowSeconds` to speed up or slow down the growth animation.
 - Adjust `TrunkR` and `TipR` to change branch thickness.
-- Change the shader colors in `TubeFS` and `TipFS` to produce different visual styles.
-- Change the sway expressions in `TubeVS` to alter wind movement.
+- Add or edit entries in the `Palettes` array to create new color schemes.
+- Change the sway/gust expressions in `TubeVS` to alter wind movement.
+- Change the fall trajectory in `PetalVS` to alter how petals drift.
 
 ## Implementation notes
 
@@ -118,21 +124,18 @@ This makes the program useful as a compact reference for direct C# interop with 
 - The program is Windows-only.
 - Rendering depends on geometry shaders, which may be slower or less portable than explicit mesh generation.
 - The entire project is currently contained in one source file.
-- The tree is generated once at startup; it is animated only through shader-based sway.
-- There is no UI for changing tree parameters at runtime.
+- Tree parameters are changed via keyboard shortcuts; there is no on-screen UI.
 - There are no textures, shadows, post-processing, or physically based materials.
 - Error handling is intentionally minimal and demo-oriented.
 
 ## Possible improvements
 
 - Move Win32, OpenGL, math, tree generation, and rendering code into separate files.
-- Add runtime controls for tree depth, branch count, colors, wind, and camera settings.
 - Generate real branch meshes on the CPU instead of relying on geometry shaders.
 - Add leaf shapes or textured billboards instead of simple glowing points.
 - Add shadow mapping.
 - Add screenshot or video capture support.
 - Add FPS/frame-time display.
-- Add presets for different tree styles.
 - Add export to OBJ/GLTF for the generated tree geometry.
 
 ## License
