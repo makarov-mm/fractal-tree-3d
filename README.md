@@ -4,7 +4,7 @@ A real-time 3D fractal tree demo written in C#/.NET using raw Win32, WGL, and Op
 
 The program generates a volumetric branching tree in 3D, renders every branch segment as a tapered tube through a geometry shader, and adds glowing canopy particles at the branch tips. It is a compact low-dependency graphics demo: no game engine, no OpenGL wrapper, no NuGet packages, and no external assets.
 
-Window creation, input handling, WGL/OpenGL context setup, OpenGL function loading, shader compilation, procedural tree generation, camera control, and rendering are implemented directly in `Program.cs`.
+Window creation, input handling, WGL/OpenGL context setup, OpenGL function loading, shader compilation, procedural tree generation, camera control, and rendering are implemented directly in the project, one concern per file.
 
 ## Screenshot
 
@@ -26,8 +26,9 @@ Window creation, input handling, WGL/OpenGL context setup, OpenGL function loadi
 - Wind with slow gusts (amplitude-modulated sway).
 - Depth-tested rendering so near branches occlude far branches correctly.
 - Background radial gradient rendered as a fullscreen quad, tinted per palette.
-- Orbit camera with mouse control, mouse-wheel zoom, and idle auto-rotation.
-- Raw Win32/WGL/OpenGL implementation through P/Invoke.
+- Orbit camera with mouse control, mouse-wheel zoom, and idle auto-rotation (time-based, the same speed at any refresh rate).
+- 4× multisampling (requested through `WGL_ARB_pixel_format`; falls back to a plain pixel format when the driver has none) and per-monitor DPI awareness, so the window renders at real pixels on high-DPI screens.
+- Raw Win32/WGL/OpenGL implementation through source-generated P/Invoke (`LibraryImport`) and unmanaged function pointers; no delegates on the render path.
 
 ## Controls
 
@@ -45,8 +46,8 @@ When the mouse is not being dragged, the camera slowly rotates automatically.
 
 ## Requirements
 
-- Windows.
-- .NET SDK.
+- Windows 10 or newer.
+- .NET 11 SDK.
 - A GPU and driver supporting OpenGL 3.3 or newer.
 - Geometry shader support.
 - Visual Studio, Rider, or the `dotnet` CLI.
@@ -68,7 +69,14 @@ Or open the project/solution in a recent IDE that supports the project format an
 ```text
 Tree3D.csproj   .NET project file
 Tree3D.slnx     Solution file
-Program.cs      Win32 windowing, OpenGL loading, shaders, tree generation, camera, and rendering
+Program.cs      Main loop: growth / palette state, camera, the four draw passes
+Window.cs       Win32 window, multisampled pixel format, OpenGL 3.3 core context, message pump, input
+Win32.cs        The Win32 / GDI / WGL declarations (source-generated P/Invoke)
+GL.cs           OpenGL entry points as unmanaged function pointers, shader and buffer helpers
+Mesh.cs         VAO + VBO for one vertex struct
+Tree.cs         Species parameters and the recursive tree generator (vertex structs for the GPU)
+Palettes.cs     The seven color palettes, including the drifting Aurora
+Shaders.cs      GLSL sources
 LICENSE         MIT license
 README.md       Project description and usage notes
 ```
@@ -77,7 +85,7 @@ README.md       Project description and usage notes
 
 The tree is generated recursively. Starting from a vertical trunk, each branch creates several child branches. The child directions are produced by tilting away from the parent branch and then rolling around the parent axis. A small deterministic random offset is applied to avoid a perfectly mechanical shape.
 
-Each branch is stored as a line segment with additional per-vertex data: normalized depth and sway factor. The depth controls the visual transition from trunk to twig, while the sway factor makes thin branches move more than thick branches.
+Each branch is stored as a line segment with additional per-vertex data: normalized depth (0 at the trunk base, 1 at the twig ends) and sway factor. The depth controls the visual transition from trunk to twig, while the sway factor makes thin branches move more than thick branches.
 
 At render time, the line segments are sent to the GPU. A geometry shader expands each line into a four-vertex triangle strip, producing a camera-facing tube-like branch. The fragment shader shades the tube with a simple cylindrical lighting approximation and blends colors from brown trunk tones to brighter pink/purple twig tones.
 
@@ -85,23 +93,24 @@ Branch tips are rendered separately as OpenGL points. The point shader changes t
 
 ## Important parameters
 
-The main tree parameters are defined near the top of `Program.cs`:
+The main tree parameters are defined near the top of `Program.cs` and `Tree.cs`:
 
 ```csharp
-const float TrunkR      = 0.030f;
-const float TipR        = 0.0035f;
-const float GrowSeconds = 8.0f;
-const int   PetalMax    = 1400;
+const float TrunkRadius  = 0.030f;
+const float TipRadius    = 0.0035f;
+const float GrowSeconds  = 8.0f;
+const int   Multisamples = 4;
+const int   MaxPetals    = 1400;   // Tree.cs
 ```
 
-Per-species parameters (branch count, depth, shrink ratio, tilt) are randomized in `RollSpecies` and can be pinned to fixed values there. Useful tuning directions:
+Per-species parameters (branch count, depth, shrink ratio, tilt) are randomized in `Species.Roll` and can be pinned to fixed values there. Useful tuning directions:
 
-- Adjust the ranges in `RollSpecies` to bias tree shapes (denser, taller, more spread out).
+- Adjust the ranges in `Species.Roll` to bias tree shapes (denser, taller, more spread out).
 - Adjust `GrowSeconds` to speed up or slow down the growth animation.
-- Adjust `TrunkR` and `TipR` to change branch thickness.
-- Add or edit entries in the `Palettes` array to create new color schemes.
-- Change the sway/gust expressions in `TubeVS` to alter wind movement.
-- Change the fall trajectory in `PetalVS` to alter how petals drift.
+- Adjust `TrunkRadius` and `TipRadius` to change branch thickness.
+- Add or edit entries in `Palettes.All` to create new color schemes.
+- Change the sway/gust expressions in `Shaders.TubeVertex` to alter wind movement.
+- Change the fall trajectory in `Shaders.PetalVertex` to alter how petals drift.
 
 ## Implementation notes
 
@@ -109,9 +118,9 @@ This project deliberately avoids helper frameworks. The code manually:
 
 - registers a Win32 window class;
 - creates a native window;
-- selects a pixel format;
-- creates a WGL/OpenGL context;
-- loads OpenGL function pointers with `wglGetProcAddress`;
+- selects a multisampled pixel format through a throwaway window (`wglChoosePixelFormatARB` needs a current context);
+- creates a WGL/OpenGL 3.3 core context;
+- loads OpenGL function pointers with `wglGetProcAddress` into `delegate* unmanaged` fields;
 - compiles GLSL vertex, geometry, and fragment shaders at runtime;
 - creates VAO/VBO objects;
 - processes Win32 mouse and window messages;
@@ -123,14 +132,12 @@ This makes the program useful as a compact reference for direct C# interop with 
 
 - The program is Windows-only.
 - Rendering depends on geometry shaders, which may be slower or less portable than explicit mesh generation.
-- The entire project is currently contained in one source file.
 - Tree parameters are changed via keyboard shortcuts; there is no on-screen UI.
 - There are no textures, shadows, post-processing, or physically based materials.
-- Error handling is intentionally minimal and demo-oriented.
+- Error handling is demo-oriented: a failure (no OpenGL 3.3, a shader that does not compile) shows a message box and exits.
 
 ## Possible improvements
 
-- Move Win32, OpenGL, math, tree generation, and rendering code into separate files.
 - Generate real branch meshes on the CPU instead of relying on geometry shaders.
 - Add leaf shapes or textured billboards instead of simple glowing points.
 - Add shadow mapping.
